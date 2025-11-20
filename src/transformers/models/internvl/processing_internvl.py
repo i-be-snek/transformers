@@ -13,49 +13,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
-from functools import partial
-from typing import Dict, List, Optional, Union
+from typing import Optional, Union
 
 import numpy as np
 
-from transformers.processing_utils import (
-    AllKwargsForChatTemplate,
-    ImagesKwargs,
-    ProcessingKwargs,
-    ProcessorMixin,
-    Unpack,
-)
-from transformers.tokenization_utils_base import PreTokenizedInput, TextInput
-
 from ...image_processing_utils import BatchFeature
-from ...image_utils import (
-    ImageInput,
-    VideoInput,
-    VideoMetadata,
-    concatenate_list,
-    make_batched_videos,
-    make_flat_list_of_images,
-)
-
-
-class InternVLImagesKwargs(ImagesKwargs, total=False):
-    crop_to_patches: Optional[bool]
-    min_patches: Optional[int]
-    max_patches: Optional[int]
+from ...image_utils import ImageInput, concatenate_list, make_flat_list_of_images
+from ...processing_utils import MultiModalData, ProcessingKwargs, ProcessorMixin, Unpack
+from ...tokenization_utils_base import PreTokenizedInput, TextInput
+from ...video_utils import VideoInput
 
 
 class InternVLProcessorKwargs(ProcessingKwargs, total=False):
-    images_kwargs: InternVLImagesKwargs
     _defaults = {
         "text_kwargs": {
             "padding_side": "left",
+            "return_mm_token_type_ids": False,
         },
         "images_kwargs": {
             "crop_to_patches": True,
         },
         "videos_kwargs": {
-            "crop_to_patches": False,
+            "return_tensors": "pt",
         },
     }
 
@@ -70,47 +49,35 @@ class InternVLProcessor(ProcessorMixin):
             The image processor is a required input.
         tokenizer ([`PreTrainedTokenizer`, `PreTrainedTokenizerFast`], *optional*):
             The tokenizer is a required input.
+        video_processor ([`AutoVideoProcessor`], *optional*):
+            The video processor is a required input.
         image_seq_length (`int`, *optional*, defaults to 256):
             The number of image token to use per image patch. it should be set so that:
             image_seq_length = (config.image_size // config.patch_size) ** 2 * (config.scale_factor**2)
         chat_template (`str`, *optional*): A Jinja template which will be used to convert lists of messages
             in a chat into a tokenizable string.
-        fake_image_token (`str`, *optional*, defaults to `"<image>"`):
-            The token to use for the image placeholder in the text. This token will be replaced by the
-            appropriate image tokens when processing the text with images.
-        fake_video_token (`str`, *optional*, defaults to `"<video>"`):
-            The token to use for the video placeholder in the text. This token will be replaced by the
-            appropriate image tokens when processing the text with videos.
     """
-
-    attributes = ["image_processor", "tokenizer"]
-    valid_kwargs = [
-        "chat_template",
-        "image_seq_length",
-        "fake_image_token",
-        "fake_video_token",
-    ]
-    image_processor_class = "AutoImageProcessor"
-    tokenizer_class = "AutoTokenizer"
 
     def __init__(
         self,
         image_processor=None,
         tokenizer=None,
+        video_processor=None,
         image_seq_length: int = 256,
         chat_template=None,
-        fake_image_token="<image>",
-        fake_video_token="<video>",
         **kwargs,
     ):
         self.image_seq_length = image_seq_length
-        self.fake_image_token = fake_image_token
-        self.fake_video_token = fake_video_token
         self.start_image_token = tokenizer.start_image_token
         self.end_image_token = tokenizer.end_image_token
-        self.context_image_token = tokenizer.context_image_token
+        self.start_image_token_id = tokenizer.start_image_token_id
+        self.end_image_token_id = tokenizer.end_image_token_id
+        self.image_token = tokenizer.context_image_token
+        self.video_token = tokenizer.video_token
+        self.image_token_id = tokenizer.context_image_token_id
+        self.image_ids = [self.image_token_id, self.start_image_token_id, self.end_image_token_id]
 
-        super().__init__(image_processor, tokenizer, chat_template=chat_template, **kwargs)
+        super().__init__(image_processor, tokenizer, video_processor, chat_template=chat_template, **kwargs)
 
     def _insert_media_placeholders(
         self,
@@ -131,43 +98,47 @@ class InternVLProcessor(ProcessorMixin):
         video_index = 0
         processed_text = []
         image_video_patches = []
+        replace_strings = []
         # Support interleaved image and video in prompts:
         # Processed patches of images and videos are inserted in `image_video_patches` in the order they appear in the prompts
         for prompt in text:
             new_prompt = prompt
-            while self.fake_image_token in new_prompt or self.fake_video_token in new_prompt:
-                if self.fake_image_token in new_prompt and (
-                    self.fake_video_token not in new_prompt
-                    or new_prompt.index(self.fake_image_token) < new_prompt.index(self.fake_video_token)
+            while self.image_token in new_prompt or self.video_token in new_prompt:
+                if self.image_token in new_prompt and (
+                    self.video_token not in new_prompt
+                    or new_prompt.index(self.image_token) < new_prompt.index(self.video_token)
                 ):
                     # Get the slice of patches corresponding to the current image
                     start_index = image_num_patches_indices[image_index - 1] if image_index > 0 else 0
                     end_index = image_num_patches_indices[image_index]
                     image_video_patches.append(image_pixel_values[start_index:end_index])
                     # Replace the corresponding image placeholder with the correct number of image tokens
-                    new_prompt = new_prompt.replace(
-                        self.fake_image_token,
-                        f"{self.start_image_token}{self.context_image_token * self.image_seq_length * image_num_patches[image_index]}{self.end_image_token}",
-                        1,
+                    new_prompt = new_prompt.replace(self.image_token, "<placeholder>", 1)
+                    replace_strings.append(
+                        f"{self.start_image_token}{self.image_token * self.image_seq_length * image_num_patches[image_index]}{self.end_image_token}"
                     )
                     image_index += 1
                 else:
                     # Get the slice of patches corresponding to the current video
                     # Here we need to account for both the multiple video frames and the potential multiple patches per frame
                     # As of now, InternVL only supports one patch per frame, but we keep the code flexible for future updates
-                    current_patch_index = video_patch_indices[video_index - 1] if video_index > 0 else 0
-                    end_patch_index = video_patch_indices[video_index]
-                    start_index = video_num_patches_indices[current_patch_index] if video_index > 0 else 0
-                    end_index = video_num_patches_indices[end_patch_index - 1]
+                    current_patch_index = video_patch_indices[video_index]
+                    end_patch_index = video_patch_indices[video_index + 1]
+                    start_index = video_num_patches_indices[current_patch_index]
+                    end_index = video_num_patches_indices[end_patch_index]
                     image_video_patches.append(video_pixel_values[start_index:end_index])
                     # Get the number of patches per frame and replace the video placeholder with the correct number of image tokens
                     num_patches = list(video_num_patches[current_patch_index:end_patch_index])
                     video_prompt = "\n".join(
-                        f"Frame{i + 1}: {self.start_image_token}{self.context_image_token * self.image_seq_length * num_patches[i]}{self.end_image_token}"
+                        f"Frame{i + 1}: {self.start_image_token}{self.image_token * self.image_seq_length * num_patches[i]}{self.end_image_token}"
                         for i in range(len(num_patches))
                     )
-                    new_prompt = new_prompt.replace(self.fake_video_token, video_prompt, 1)
+                    replace_strings.append(video_prompt)
+                    new_prompt = new_prompt.replace(self.video_token, "<placeholder>", 1)
                     video_index += 1
+            while "<placeholder>" in new_prompt:
+                replace_str = replace_strings.pop(0)
+                new_prompt = new_prompt.replace("<placeholder>", replace_str, 1)
             processed_text.append(new_prompt)
 
         return processed_text, image_video_patches, image_index, video_index
@@ -175,8 +146,7 @@ class InternVLProcessor(ProcessorMixin):
     def __call__(
         self,
         images: Optional[ImageInput] = None,
-        text: Optional[Union[TextInput, PreTokenizedInput, List[TextInput], List[PreTokenizedInput]]] = None,
-        audio=None,
+        text: Optional[Union[TextInput, PreTokenizedInput, list[TextInput], list[PreTokenizedInput]]] = None,
         videos: Optional[VideoInput] = None,
         **kwargs: Unpack[InternVLProcessorKwargs],
     ) -> BatchFeature:
@@ -184,25 +154,23 @@ class InternVLProcessor(ProcessorMixin):
         Main method to prepare for the model one or several sequences(s) and image(s). This method forwards the `text`
         and `kwargs` arguments to PreTrainedTokenizerFast's [`~PreTrainedTokenizerFast.__call__`] to encode the text if `text`
         is not `None`, otherwise encode default OCR queries which depends on the `format`, `box`, `color`, `multi_page` and
-        `crop_to_patches` arguments. To prepare the vision inputs, this method forwards the `images` and `kwrags` arguments to
+        `crop_to_patches` arguments. To prepare the vision inputs, this method forwards the `images` and `kwargs` arguments to
         GotOcr2ImageProcessor's [`~GotOcr2ImageProcessor.__call__`] if `images` is not `None`.
 
         Args:
-            images (`PIL.Image.Image`, `np.ndarray`, `torch.Tensor`, `List[PIL.Image.Image]`, `List[np.ndarray]`, `List[torch.Tensor]`):
+            images (`PIL.Image.Image`, `np.ndarray`, `torch.Tensor`, `list[PIL.Image.Image]`, `list[np.ndarray]`, `list[torch.Tensor]`):
                 The image or batch of images to be prepared. Each image can be a PIL image, NumPy array or PyTorch
                 tensor. Both channels-first and channels-last formats are supported.
-            text (`str`, `List[str]`, `List[List[str]]`):
+            text (`str`, `list[str]`, `list[list[str]]`):
                 The sequence or batch of sequences to be encoded. Each sequence can be a string or a list of strings
                 (pretokenized string). If the sequences are provided as list of strings (pretokenized), you must set
                 `is_split_into_words=True` (to lift the ambiguity with a batch of sequences).
-            videos (`np.ndarray`, `torch.Tensor`, `List[np.ndarray]`, `List[torch.Tensor]`):
+            videos (`np.ndarray`, `torch.Tensor`, `list[np.ndarray]`, `list[torch.Tensor]`):
                 The image or batch of videos to be prepared. Each video can be a 4D NumPy array or PyTorch
             return_tensors (`str` or [`~utils.TensorType`], *optional*):
                 If set, will return tensors of a particular framework. Acceptable values are:
-                - `'tf'`: Return TensorFlow `tf.constant` objects.
                 - `'pt'`: Return PyTorch `torch.Tensor` objects.
                 - `'np'`: Return NumPy `np.ndarray` objects.
-                - `'jax'`: Return JAX `jnp.ndarray` objects.
 
         Returns:
             [`BatchFeature`]: A [`BatchFeature`] with the following fields:
@@ -227,29 +195,38 @@ class InternVLProcessor(ProcessorMixin):
 
         # Process images and videos separately, as videos don't support crop_to_patches
         image_num_patches = []
-        video_num_patches = []
-        image_videos_inputs = {}
         image_pixel_values = None
-        video_pixel_values = None
         image_num_patches_indices = np.array([0])
-        video_patch_indices = np.array([0])
-        video_num_patches_indices = np.array([0])
         if images is not None:
+            images = self.image_processor.fetch_images(images)
             images = make_flat_list_of_images(images)
             image_inputs = self.image_processor(images=images, **output_kwargs["images_kwargs"])
             image_num_patches = image_inputs.pop("num_patches")
             image_pixel_values = image_inputs.pop("pixel_values")
             image_num_patches_indices = np.cumsum(image_num_patches)
-        if videos is not None:
-            videos = make_batched_videos(videos)
-            num_frames_per_video = [len(video) for video in videos]
-            video_patch_indices = np.cumsum(num_frames_per_video)
-            output_kwargs["images_kwargs"]["crop_to_patches"] = False
-            video_inputs = self.image_processor(images=videos, **output_kwargs["videos_kwargs"])
-            video_num_patches = video_inputs.pop("num_patches")
-            video_pixel_values = video_inputs.pop("pixel_values")
-            video_num_patches_indices = np.cumsum(video_num_patches)
 
+        video_num_patches = []  # per frame
+        video_pixel_values = None
+        video_patch_indices = np.array([0])
+        video_num_patches_indices = np.array([0])
+        if videos is not None:
+            video_kwargs = output_kwargs["videos_kwargs"]
+            video_inputs = self.video_processor(videos=videos, **video_kwargs)
+            video_pixel_values = video_inputs.pop("pixel_values_videos")
+
+            batch_size, num_frames, *_ = video_pixel_values.shape
+            num_frames_per_video = np.full(batch_size, num_frames)
+            num_frames = sum(num_frames_per_video)  # total
+            video_patch_indices = np.empty(batch_size + 1, int)
+            video_patch_indices[0] = 0
+            video_patch_indices[1:] = np.cumsum(num_frames_per_video)
+            video_num_patches = [1] * num_frames
+            video_num_patches_indices = np.empty(num_frames + 1, int)
+            video_num_patches_indices[0] = 0
+            video_num_patches_indices[1:] = np.cumsum(video_num_patches)
+            video_pixel_values = video_pixel_values.flatten(0, 1)
+
+        image_videos_inputs = {}
         if images is not None or videos is not None:
             text, image_video_patches, image_index, video_index = self._insert_media_placeholders(
                 text,
@@ -263,116 +240,59 @@ class InternVLProcessor(ProcessorMixin):
             )
             if images is not None and image_index != len(images):
                 raise ValueError("Number of image placeholders in the prompt does not match the number of images.")
-            if videos is not None and video_index != len(videos):
+            if videos is not None and video_index != len(num_frames_per_video):
                 raise ValueError("Number of video placeholders in the prompt does not match the number of videos.")
 
             # Concatenate the interleaved image and video patches (function agnostic to the patches type (list, numpy array, torch tensor))
             image_videos_inputs = {"pixel_values": concatenate_list(image_video_patches)}
 
+        return_tensors = output_kwargs["text_kwargs"].pop("return_tensors", None)
+        return_mm_token_type_ids = output_kwargs["text_kwargs"].pop("return_mm_token_type_ids", None)
         text_inputs = self.tokenizer(text, **output_kwargs["text_kwargs"])
+        self._check_special_mm_tokens(text, text_inputs, modalities=["image"])
 
-        return BatchFeature(data={**text_inputs, **image_videos_inputs})
+        if return_mm_token_type_ids:
+            array_ids = np.array(text_inputs["input_ids"])
+            mm_token_type_ids = np.zeros_like(text_inputs["input_ids"])
+            mm_token_type_ids[np.isin(array_ids, self.image_ids)] = 1
+            text_inputs["mm_token_type_ids"] = mm_token_type_ids.tolist()
 
-    def sample_indices_fn(
-        self, metadata: VideoMetadata, num_frames: int = None, initial_shift: Union[bool, float, int] = True
-    ):
+        return BatchFeature(data={**text_inputs, **image_videos_inputs}, tensor_type=return_tensors)
+
+    def _get_num_multimodal_tokens(self, image_sizes=None, **kwargs):
         """
-        The function to generate indices of frames to sample from a video.
+        Computes the number of placeholder tokens needed for multimodal inputs with the given sizes.
 
         Args:
-            metadata (`VideoMetadata`):
-                `VideoMetadata` object containing metadat about the video, such as "total_num_frames" or "fps".
-            num_frames (`int`, *optional*):
-                Number of frames to sample uniformly. If None, all frames are sampled.
-            initial_shift (`bool`, `float` or `int`, defaults to `0`):
-                The initial shift to apply when sampling frames. If `True`, the shift is set so that frames are sampled from the middle of the video.
+            image_sizes (`list[list[int]]`, *optional*):
+                The input sizes formatted as (height, width) per each image.
 
         Returns:
-            `np.ndarray`: Array of frame indices to sample.
+            `MultiModalData`: A `MultiModalData` object holding number of tokens per each of the provided
+            input modalities, along with other useful data.
         """
-        if initial_shift is True:
-            initial_shift = metadata.total_num_frames / num_frames / 2
-        if num_frames is not None:
-            indices = np.arange(
-                initial_shift, metadata.total_num_frames, metadata.total_num_frames / num_frames
-            ).astype(int)
-        else:
-            indices = np.arange(initial_shift, metadata.total_num_frames).astype(int)
 
-        return indices
+        vision_data = {}
+        if image_sizes is not None:
+            images_kwargs = InternVLProcessorKwargs._defaults.get("images_kwargs", {})
+            images_kwargs.update(kwargs)
 
-    def batch_decode(self, *args, **kwargs):
-        """
-        This method forwards all its arguments to PreTrainedTokenizerFast's [`~PreTrainedTokenizer.batch_decode`]. Please
-        refer to the docstring of this method for more information.
-        """
-        return self.tokenizer.batch_decode(*args, **kwargs)
+            num_image_patches = [
+                self.image_processor.get_number_of_image_patches(*image_size, images_kwargs)
+                for image_size in image_sizes
+            ]
+            # Add 2 for BOI and EOI tokens
+            num_image_tokens = [2 + (self.image_seq_length * num_patches) for num_patches in num_image_patches]
+            vision_data.update({"num_image_tokens": num_image_tokens, "num_image_patches": num_image_patches})
 
-    def decode(self, *args, **kwargs):
-        """
-        This method forwards all its arguments to PreTrainedTokenizerFast's [`~PreTrainedTokenizer.decode`]. Please refer to
-        the docstring of this method for more information.
-        """
-        return self.tokenizer.decode(*args, **kwargs)
+        return MultiModalData(**vision_data)
 
     @property
     def model_input_names(self):
+        # Overwritten because InternVL renames video inputs to `pixel_values` before returning
         tokenizer_input_names = self.tokenizer.model_input_names
         image_processor_input_names = self.image_processor.model_input_names
-        return list(tokenizer_input_names) + list(image_processor_input_names)
-
-    # Add model-specific video sampling method when applying the template
-    def apply_chat_template(
-        self,
-        conversation: Union[List[Dict[str, str]], List[List[Dict[str, str]]]],
-        chat_template: Optional[str] = None,
-        num_frames: int = 8,
-        initial_shift: Union[bool, float, int] = True,
-        video_load_backend="pyav",
-        **kwargs: Unpack[AllKwargsForChatTemplate],
-    ):
-        """
-        Similar to the `apply_chat_template` method on tokenizers, this method applies a Jinja template to input
-        conversations to turn them into a single tokenizable string.
-
-        The input is expected to be in the following format, where each message content is a list consisting of text and
-        optionally image or video inputs. One can also provide an image, video, URL or local path which will be used to form
-        `pixel_values` when `return_dict=True`. If not provided, one will get only the formatted text, optionally tokenized text.
-
-        conversation = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image", "image": "https://www.ilankelman.org/stopsigns/australia.jpg"},
-                    {"type": "text", "text": "Please describe this image in detail."},
-                ],
-            },
-        ]
-
-        Args:
-            conversation (`Union[List[Dict, [str, str]], List[List[Dict[str, str]]]]`):
-                The conversation to format.
-            chat_template (`Optional[str]`, *optional*):
-                The Jinja template to use for formatting the conversation. If not provided, the tokenizer's
-                chat template is used.
-            num_frames (`int`, *optional*, defaults to 8):
-                Number of frames to sample from a video when using the default `sample_indices_fn`.
-            initial_shift (`bool`, `float` or `int`, defaults to `0`):
-                The initial shift to apply when sampling frames using the default `sample_indices_fn`.
-                If `True`, the shift is set so that frames are sampled from the middle of the video.
-        """
-        sample_indices_fn = kwargs.pop(
-            "sample_indices_fn", partial(self.sample_indices_fn, num_frames=num_frames, initial_shift=initial_shift)
-        )
-
-        return super().apply_chat_template(
-            conversation,
-            chat_template,
-            video_load_backend=video_load_backend,
-            num_frames=num_frames,
-            sample_indices_fn=sample_indices_fn,
-            **kwargs,
-        )
+        return tokenizer_input_names + image_processor_input_names
 
 
 __all__ = ["InternVLProcessor"]

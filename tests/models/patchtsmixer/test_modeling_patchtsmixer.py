@@ -18,7 +18,6 @@ import itertools
 import random
 import tempfile
 import unittest
-from typing import Optional, Union
 
 import numpy as np
 from huggingface_hub import hf_hub_download
@@ -27,6 +26,7 @@ from parameterized import parameterized
 from transformers import is_torch_available
 from transformers.models.auto import get_values
 from transformers.testing_utils import is_flaky, require_torch, slow, torch_device
+from transformers.utils import check_torch_load_is_safe
 
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import ModelTesterMixin, floats_tensor, ids_tensor
@@ -86,17 +86,17 @@ class PatchTSMixerModelTester:
         masked_loss: bool = False,
         mask_mode: str = "mask_before_encoder",
         channel_consistent_masking: bool = True,
-        scaling: Optional[Union[str, bool]] = "std",
+        scaling: str | bool | None = "std",
         # Head related
         head_dropout: float = 0.2,
         # forecast related
         prediction_length: int = 16,
-        out_channels: int = None,
+        out_channels: int | None = None,
         # Classification/regression related
         # num_labels: int = 3,
         num_targets: int = 3,
-        output_range: list = None,
-        head_aggregation: str = None,
+        output_range: list | None = None,
+        head_aggregation: str | None = None,
         # Trainer related
         batch_size=13,
         is_training=True,
@@ -220,16 +220,13 @@ class PatchTSMixerModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.Test
     )
     pipeline_model_mapping = {"feature-extraction": PatchTSMixerModel} if is_torch_available() else {}
     is_encoder_decoder = False
-    test_pruning = False
-    test_head_masking = False
+
     test_missing_keys = False
-    test_torchscript = False
     test_inputs_embeds = False
 
     test_resize_embeddings = True
     test_resize_position_embeddings = False
     test_mismatched_shapes = True
-    test_model_parallel = False
     has_attentions = False
 
     def setUp(self):
@@ -279,7 +276,7 @@ class PatchTSMixerModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.Test
             with tempfile.TemporaryDirectory() as tmpdirname:
                 model.save_pretrained(tmpdirname)
                 model2, info = model_class.from_pretrained(tmpdirname, output_loading_info=True)
-            self.assertEqual(info["missing_keys"], [])
+            self.assertEqual(info["missing_keys"], set())
 
     def test_hidden_states_output(self):
         def check_hidden_states_output(inputs_dict, config, model_class):
@@ -451,6 +448,7 @@ class PatchTSMixerModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.Test
 def prepare_batch(repo_id="ibm/patchtsmixer-etth1-test-data", file="pretrain_batch.pt"):
     # TODO: Make repo public
     file = hf_hub_download(repo_id=repo_id, filename=file, repo_type="dataset")
+    check_torch_load_is_safe()
     batch = torch.load(file, map_location=torch_device, weights_only=True)
     return batch
 
@@ -478,7 +476,7 @@ class PatchTSMixerModelIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(output.shape, expected_shape)
 
-        expected_slice = torch.tensor([[[[-0.9106]],[[1.5326]],[[-0.8245]],[[0.7439]],[[-0.7830]],[[2.6256]],[[-0.6485]],]],device=torch_device)  # fmt: skip
+        expected_slice = torch.tensor([[[-0.9106]],[[1.5326]],[[-0.8245]],[[0.7439]],[[-0.7830]],[[2.6256]],[[-0.6485]],],device=torch_device)  # fmt: skip
         torch.testing.assert_close(output[0, :7, :1, :1], expected_slice, rtol=TOLERANCE, atol=TOLERANCE)
 
     def test_forecasting_head(self):

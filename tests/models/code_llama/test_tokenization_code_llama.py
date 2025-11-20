@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import os
-import pickle
 import shutil
 import tempfile
 import unittest
@@ -231,7 +230,6 @@ class CodeLlamaTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
                     batch = tokenizer(
                         text=text,
                         max_length=3,
-                        max_target_length=10,
                         return_tensors="pt",
                     )
                 except NotImplementedError:
@@ -241,7 +239,7 @@ class CodeLlamaTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
                 batch = tokenizer(text, max_length=3, return_tensors="pt")
                 self.assertEqual(batch.input_ids.shape[1], 3)
 
-                batch_encoder_only = tokenizer(text=text, max_length=3, max_target_length=10, return_tensors="pt")
+                batch_encoder_only = tokenizer(text=text, max_length=3, return_tensors="pt")
                 self.assertEqual(batch_encoder_only.input_ids.shape[1], 3)
                 self.assertEqual(batch_encoder_only.attention_mask.shape[1], 3)
                 self.assertNotIn("decoder_input_ids", batch_encoder_only)
@@ -293,17 +291,6 @@ class CodeLlamaTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
             revision="6eb30c03ab6a9e2cdef4d523024909ec815ddb75",
             padding=False,
         )
-
-    def test_picklable(self):
-        with tempfile.NamedTemporaryFile() as f:
-            shutil.copyfile(SAMPLE_VOCAB, f.name)
-            tokenizer = CodeLlamaTokenizer(f.name, keep_accents=True)
-            pickled_tokenizer = pickle.dumps(tokenizer)
-        pickle.loads(pickled_tokenizer)
-
-    @unittest.skip(reason="worker 'gw4' crashed on CI, passing locally.")
-    def test_pickle_subword_regularization_tokenizer(self):
-        pass
 
     @unittest.skip(reason="worker 'gw4' crashed on CI, passing locally.")
     def test_subword_regularization_tokenizer(self):
