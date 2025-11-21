@@ -1471,7 +1471,7 @@ MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING_NAMES = OrderedDict(
         ("glm4", "Glm4ForTokenClassification"),
         ("gpt-sw3", "GPT2ForTokenClassification"),
         ("gpt2", "GPT2ForTokenClassification"),
-        ("gpt2_moe", "GPT2MoEForTokenClassification")(
+        ("gpt2_moe", "GPT2MoEForTokenClassification"),(
             "gpt_bigcode", "GPTBigCodeForTokenClassification"
         ),
         ("gpt_neo", "GPTNeoForTokenClassification"),
