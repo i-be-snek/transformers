@@ -619,6 +619,7 @@ MODEL_NAMES_MAPPING = OrderedDict[str, str](
         ("glpn", "GLPN"),
         ("got_ocr2", "GOT-OCR2"),
         ("gpt-sw3", "GPT-Sw3"),
+        ("gpt2_moe", "GPT2MoE"),
         ("gpt2", "OpenAI GPT-2"),
         ("gpt_bigcode", "GPTBigCode"),
         ("gpt_neo", "GPT Neo"),
