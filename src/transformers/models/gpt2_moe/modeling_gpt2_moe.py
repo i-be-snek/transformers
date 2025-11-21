@@ -51,6 +51,7 @@ import torch.nn.functional as F
 
 logger = logging.get_logger(__name__)
 
+
 def load_balancing_loss_func(
     gate_logits: Union[torch.Tensor, Tuple[torch.Tensor], None],
     num_experts: Optional[int] = None,
@@ -107,25 +108,25 @@ def load_balancing_loss_func(
         router_prob_per_expert = torch.mean(routing_weights, dim=0)
     else:
         batch_size, sequence_length = attention_mask.shape
-        num_hidden_layers = (
-            concatenated_gate_logits.shape[0]
-            // (batch_size * sequence_length)
+        num_hidden_layers = concatenated_gate_logits.shape[0] // (
+            batch_size * sequence_length
         )
 
         # Compute the mask that masks all padding tokens as 0 with the same
         # shape of expert_mask
         expert_attention_mask = (
             attention_mask[None, :, :, None, None]
-            .expand((num_hidden_layers, batch_size, sequence_length, top_k, num_experts))
+            .expand(
+                (num_hidden_layers, batch_size, sequence_length, top_k, num_experts)
+            )
             .reshape(-1, top_k, num_experts)
             .to(compute_device)
         )
 
         # Compute the percentage of tokens routed to each experts
-        tokens_per_expert = (
-            torch.sum(expert_mask.float() * expert_attention_mask, dim=0)
-            / torch.sum(expert_attention_mask, dim=0)
-        )
+        tokens_per_expert = torch.sum(
+            expert_mask.float() * expert_attention_mask, dim=0
+        ) / torch.sum(expert_attention_mask, dim=0)
 
         # Compute the mask that masks all padding tokens as 0 with the same
         # shape of tokens_per_expert
@@ -137,22 +138,23 @@ def load_balancing_loss_func(
         )
 
         # Compute the average probability of routing to these experts
-        router_prob_per_expert = (
-            torch.sum(routing_weights * router_per_expert_attention_mask, dim=0)
-            / torch.sum(router_per_expert_attention_mask, dim=0)
-        )
+        router_prob_per_expert = torch.sum(
+            routing_weights * router_per_expert_attention_mask, dim=0
+        ) / torch.sum(router_per_expert_attention_mask, dim=0)
 
-    overall_loss = torch.sum(
-        tokens_per_expert * router_prob_per_expert.unsqueeze(0)
-    )
+    overall_loss = torch.sum(tokens_per_expert * router_prob_per_expert.unsqueeze(0))
     return overall_loss * num_experts
+
 
 def eager_attention_forward(module, query, key, value, attention_mask, **kwargs):
     attn_weights = torch.matmul(query, key.transpose(-1, -2))
 
     if module.scale_attn_weights:
         attn_weights = attn_weights / torch.full(
-            [], value.size(-1) ** 0.5, dtype=attn_weights.dtype, device=attn_weights.device
+            [],
+            value.size(-1) ** 0.5,
+            dtype=attn_weights.dtype,
+            device=attn_weights.device,
         )
 
     # Layer-wise attention scaling
@@ -162,12 +164,18 @@ def eager_attention_forward(module, query, key, value, attention_mask, **kwargs)
     if not module.is_cross_attention:
         # if only "normal" attention layer implements causal mask
         query_length, key_length = query.size(-2), key.size(-2)
-        causal_mask = module.bias[:, :, key_length - query_length : key_length, :key_length]
+        causal_mask = module.bias[
+            :, :, key_length - query_length : key_length, :key_length
+        ]
         mask_value = torch.finfo(attn_weights.dtype).min
         # Need to be a tensor, otherwise we get error: `RuntimeError: expected scalar type float but found double`.
         # Need to be on the same device, otherwise `RuntimeError: ..., x and y to be on the same device`
-        mask_value = torch.full([], mask_value, dtype=attn_weights.dtype, device=attn_weights.device)
-        attn_weights = torch.where(causal_mask, attn_weights.to(attn_weights.dtype), mask_value)
+        mask_value = torch.full(
+            [], mask_value, dtype=attn_weights.dtype, device=attn_weights.device
+        )
+        attn_weights = torch.where(
+            causal_mask, attn_weights.to(attn_weights.dtype), mask_value
+        )
 
     if attention_mask is not None:
         # Apply the attention mask
@@ -192,18 +200,12 @@ class GPT2MoEAttention(nn.Module):
         self.config = config
         self.layer_idx = layer_idx
         max_positions = config.max_position_embeddings
-        self.scale_attn_by_inverse_layer_idx = (
-            config.scale_attn_by_inverse_layer_idx
-        )
+        self.scale_attn_by_inverse_layer_idx = config.scale_attn_by_inverse_layer_idx
         self.register_buffer(
             "bias",
             torch.tril(
-                torch.ones(
-                    (max_positions, max_positions), dtype=torch.bool
-                )
-            ).view(
-                1, 1, max_positions, max_positions
-            ),
+                torch.ones((max_positions, max_positions), dtype=torch.bool)
+            ).view(1, 1, max_positions, max_positions),
             persistent=False,
         )
 
@@ -228,19 +230,14 @@ class GPT2MoEAttention(nn.Module):
         self.scale_attn_weights = config.scale_attn_weights
 
     def attention_forward(
-        self,
-        query,
-        key,
-        value,
-        attention_mask,
-        head_mask=None,
-        **kwargs
+        self, query, key, value, attention_mask, head_mask=None, **kwargs
     ):
         attn_weights = torch.matmul(query, key.transpose(-1, -2))
 
         if self.scale_attn_weights:
             attn_weights = attn_weights / torch.full(
-                [], value.size(-1) ** 0.5,
+                [],
+                value.size(-1) ** 0.5,
                 dtype=attn_weights.dtype,
                 device=attn_weights.device,
             )
@@ -260,10 +257,7 @@ class GPT2MoEAttention(nn.Module):
         # Need to be on the same device, otherwise
         #     `RuntimeError: ..., x and y to be on the same device`
         mask_value = torch.full(
-            [],
-            mask_value,
-            dtype=attn_weights.dtype,
-            device=attn_weights.device
+            [], mask_value, dtype=attn_weights.dtype, device=attn_weights.device
         )
         attn_weights = torch.where(
             causal_mask, attn_weights.to(attn_weights.dtype), mask_value
@@ -299,9 +293,9 @@ class GPT2MoEAttention(nn.Module):
         *args,
         **kwargs,
     ) -> Tuple[Union[torch.Tensor, Tuple[torch.Tensor]], ...]:
-        query_states, key_states, value_states = self.c_attn(
-            hidden_states
-        ).split(self.split_size, dim=2)
+        query_states, key_states, value_states = self.c_attn(hidden_states).split(
+            self.split_size, dim=2
+        )
 
         shape_q = (*query_states.shape[:-1], -1, self.head_dim)
         shape_kv = (*key_states.shape[:-1], -1, self.head_dim)
@@ -333,15 +327,14 @@ class GPT2MoEAttention(nn.Module):
             **kwargs,
         )
 
-        attn_output = attn_output.reshape(
-            *attn_output.shape[:-2], -1
-        ).contiguous()
+        attn_output = attn_output.reshape(*attn_output.shape[:-2], -1).contiguous()
         attn_output = self.c_proj(attn_output)
         attn_output = self.resid_dropout(attn_output)
 
         outputs = (attn_output, present)
 
         return outputs
+
 
 class GPT2MLP(nn.Module):
     def __init__(self, intermediate_size, config):
@@ -352,16 +345,19 @@ class GPT2MLP(nn.Module):
         self.act = ACT2FN[config.activation_function]
         self.dropout = nn.Dropout(config.resid_pdrop)
 
-    def forward(self, hidden_states: Optional[tuple[torch.FloatTensor]]) -> torch.FloatTensor:
+    def forward(
+        self, hidden_states: Optional[tuple[torch.FloatTensor]]
+    ) -> torch.FloatTensor:
         hidden_states = self.c_fc(hidden_states)
         hidden_states = self.act(hidden_states)
         hidden_states = self.c_proj(hidden_states)
         hidden_states = self.dropout(hidden_states)
         return hidden_states
 
+
 class MixtureOfExperts(nn.Module):
-    """This class implements the Mixture-Of-Experts derived from Mixtral.
-    """
+    """This class implements the Mixture-Of-Experts derived from Mixtral."""
+
     def __init__(self, intermediate_size, config):
         super().__init__()
         self.config = config
@@ -369,10 +365,9 @@ class MixtureOfExperts(nn.Module):
         self.num_expert = config.n_expert
         self.k = config.top_k_expert
 
-        self.experts = nn.ModuleList([
-            GPT2MLP(intermediate_size, config)
-            for _ in range(self.num_expert)
-        ])
+        self.experts = nn.ModuleList(
+            [GPT2MLP(intermediate_size, config) for _ in range(self.num_expert)]
+        )
 
         self.gating_network = nn.Linear(
             config.n_embd,
@@ -381,8 +376,7 @@ class MixtureOfExperts(nn.Module):
         )
 
     def forward(
-        self,
-        hidden_states: Optional[Tuple[torch.FloatTensor]]
+        self, hidden_states: Optional[Tuple[torch.FloatTensor]]
     ) -> torch.FloatTensor:
         batch_size, sequence_length, hidden_dim = hidden_states.shape
         hidden_states = hidden_states.view(-1, hidden_dim)
@@ -390,9 +384,7 @@ class MixtureOfExperts(nn.Module):
         router_logits = self.gating_network(hidden_states)
 
         router_weights = F.softmax(router_logits, dim=-1, dtype=torch.float)
-        routing_weights, selected_experts = torch.topk(
-            router_weights, k=self.k, dim=-1
-        )
+        routing_weights, selected_experts = torch.topk(router_weights, k=self.k, dim=-1)
         routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
         routing_weights = routing_weights.to(hidden_states.dtype)
 
@@ -406,13 +398,12 @@ class MixtureOfExperts(nn.Module):
         # this will be used to easily index which expert is going to be
         # sollicitated
         expert_mask = torch.nn.functional.one_hot(
-            selected_experts,
-            num_classes=self.num_expert
+            selected_experts, num_classes=self.num_expert
         ).permute(2, 1, 0)
 
         expert_hitted = (
-            expert_mask.sum(dim=(-1, -2)) > 0
-        ).nonzero(as_tuple=True)[0].tolist()
+            (expert_mask.sum(dim=(-1, -2)) > 0).nonzero(as_tuple=True)[0].tolist()
+        )
         for expert_idx in expert_hitted:
             expert_layer = self.experts[expert_idx]
             idx, top_x = torch.where(expert_mask[expert_idx])
@@ -422,8 +413,7 @@ class MixtureOfExperts(nn.Module):
             # corresponding tokens (top-1 and top-2)
             current_state = hidden_states[None, top_x].reshape(-1, hidden_dim)
             current_hidden_states = (
-                expert_layer(current_state)
-                * routing_weights[top_x, idx, None]
+                expert_layer(current_state) * routing_weights[top_x, idx, None]
             )
 
             # However `index_add_` only support torch tensors for indexing so
@@ -436,7 +426,8 @@ class MixtureOfExperts(nn.Module):
             batch_size, sequence_length, hidden_dim
         )
         return final_hidden_states, router_logits
-    
+
+
 class GPT2MoEBlock(nn.Module):
     def __init__(self, config, layer_idx=None):
         super().__init__()
@@ -461,7 +452,7 @@ class GPT2MoEBlock(nn.Module):
         **kwargs,
     ) -> Union[
         Tuple[torch.Tensor],
-        Optional[Tuple[torch.Tensor, Tuple[torch.FloatTensor, ...]]]
+        Optional[Tuple[torch.Tensor, Tuple[torch.FloatTensor, ...]]],
     ]:
         residual = hidden_states
         hidden_states = self.ln_1(hidden_states)
@@ -533,17 +524,26 @@ class GPT2SequenceSummary(nn.Module):
 
         self.summary = nn.Identity()
         if hasattr(config, "summary_use_proj") and config.summary_use_proj:
-            if hasattr(config, "summary_proj_to_labels") and config.summary_proj_to_labels and config.num_labels > 0:
+            if (
+                hasattr(config, "summary_proj_to_labels")
+                and config.summary_proj_to_labels
+                and config.num_labels > 0
+            ):
                 num_classes = config.num_labels
             else:
                 num_classes = config.hidden_size
             self.summary = nn.Linear(config.hidden_size, num_classes)
 
         activation_string = getattr(config, "summary_activation", None)
-        self.activation: Callable = get_activation(activation_string) if activation_string else nn.Identity()
+        self.activation: Callable = (
+            get_activation(activation_string) if activation_string else nn.Identity()
+        )
 
         self.first_dropout = nn.Identity()
-        if hasattr(config, "summary_first_dropout") and config.summary_first_dropout > 0:
+        if (
+            hasattr(config, "summary_first_dropout")
+            and config.summary_first_dropout > 0
+        ):
             self.first_dropout = nn.Dropout(config.summary_first_dropout)
 
         self.last_dropout = nn.Identity()
@@ -551,7 +551,9 @@ class GPT2SequenceSummary(nn.Module):
             self.last_dropout = nn.Dropout(config.summary_last_dropout)
 
     def forward(
-        self, hidden_states: torch.FloatTensor, cls_index: Optional[torch.LongTensor] = None
+        self,
+        hidden_states: torch.FloatTensor,
+        cls_index: Optional[torch.LongTensor] = None,
     ) -> torch.FloatTensor:
         """
         Compute a single vector summary of a sequence hidden states.
@@ -580,9 +582,13 @@ class GPT2SequenceSummary(nn.Module):
                 )
             else:
                 cls_index = cls_index.unsqueeze(-1).unsqueeze(-1)
-                cls_index = cls_index.expand((-1,) * (cls_index.dim() - 1) + (hidden_states.size(-1),))
+                cls_index = cls_index.expand(
+                    (-1,) * (cls_index.dim() - 1) + (hidden_states.size(-1),)
+                )
             # shape of cls_index: (bsz, XX, 1, hidden_size) where XX are optional leading dim of hidden_states
-            output = hidden_states.gather(-2, cls_index).squeeze(-2)  # shape (bsz, XX, hidden_size)
+            output = hidden_states.gather(-2, cls_index).squeeze(
+                -2
+            )  # shape (bsz, XX, hidden_size)
         elif self.summary_type == "attn":
             raise NotImplementedError
 
@@ -617,15 +623,11 @@ class GPT2MoEPreTrainedModel(PreTrainedModel):
             # Slightly different from the TF version which uses truncated_normal
             # for initialization
             # cf https://github.com/pytorch/pytorch/pull/5617
-            module.weight.data.normal_(
-                mean=0.0, std=self.config.initializer_range
-            )
+            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
             if module.bias is not None:
                 module.bias.data.zero_()
         elif isinstance(module, nn.Embedding):
-            module.weight.data.normal_(
-                mean=0.0, std=self.config.initializer_range
-            )
+            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
             if module.padding_idx is not None:
                 module.weight.data[module.padding_idx].zero_()
         elif isinstance(module, nn.LayerNorm):
@@ -647,11 +649,13 @@ class GPT2MoEPreTrainedModel(PreTrainedModel):
                 # Special Scaled Initialization --> There are 2 Layer Norms
                 # per Transformer Block
                 p.data.normal_(
-                    mean=0.0, std=(
+                    mean=0.0,
+                    std=(
                         self.config.initializer_range
                         / math.sqrt(2 * self.config.n_layer)
-                    )
+                    ),
                 )
+
 
 @dataclass
 @auto_docstring(
@@ -697,10 +701,7 @@ class GPT2MoEModel(GPT2MoEPreTrainedModel):
 
         self.drop = nn.Dropout(config.embd_pdrop)
         self.h = nn.ModuleList(
-            [
-                GPT2MoEBlock(config, layer_idx=i)
-                for i in range(config.num_hidden_layers)
-            ]
+            [GPT2MoEBlock(config, layer_idx=i) for i in range(config.num_hidden_layers)]
         )
         self.ln_f = nn.LayerNorm(self.embed_dim, eps=config.layer_norm_epsilon)
 
@@ -726,11 +727,7 @@ class GPT2MoEModel(GPT2MoEPreTrainedModel):
         *args,
         **kwargs,
     ) -> Union[Tuple, MoeModelOutputWithPast]:
-        use_cache = (
-            use_cache
-            if use_cache is not None
-            else self.config.use_cache
-        )
+        use_cache = use_cache if use_cache is not None else self.config.use_cache
 
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError(
@@ -738,9 +735,7 @@ class GPT2MoEModel(GPT2MoEPreTrainedModel):
                 "same time"
             )
         elif input_ids is not None:
-            self.warn_if_padding_and_no_attention_mask(
-                input_ids, attention_mask
-            )
+            self.warn_if_padding_and_no_attention_mask(input_ids, attention_mask)
             input_shape = input_ids.size()
             input_ids = input_ids.view(-1, input_shape[-1])
             batch_size = input_ids.shape[0]
@@ -748,15 +743,9 @@ class GPT2MoEModel(GPT2MoEPreTrainedModel):
             input_shape = inputs_embeds.size()[:-1]
             batch_size = inputs_embeds.shape[0]
         else:
-            raise ValueError(
-                "You have to specify either input_ids or inputs_embeds"
-            )
+            raise ValueError("You have to specify either input_ids or inputs_embeds")
 
-        device = (
-            input_ids.device
-            if input_ids is not None
-            else inputs_embeds.device
-        )
+        device = input_ids.device if input_ids is not None else inputs_embeds.device
 
         if token_type_ids is not None:
             token_type_ids = token_type_ids.view(-1, input_shape[-1])
@@ -799,10 +788,7 @@ class GPT2MoEModel(GPT2MoEPreTrainedModel):
             # this is effectively the same as removing these entirely.
             # fp16 compatibility
             attention_mask = attention_mask.to(dtype=self.dtype)
-            attention_mask = (
-                (1.0 - attention_mask)
-                * torch.finfo(self.dtype).min
-            )
+            attention_mask = (1.0 - attention_mask) * torch.finfo(self.dtype).min
 
         # Prepare head mask if needed
         # 1.0 in head_mask indicate we keep the head
@@ -849,7 +835,7 @@ class GPT2MoEModel(GPT2MoEPreTrainedModel):
             past_key_values=presents,
             router_logits=all_router_logits,
         )
-        
+
 
 @auto_docstring(
     custom_intro="""
@@ -857,7 +843,7 @@ class GPT2MoEModel(GPT2MoEPreTrainedModel):
     embeddings).
     """
 )
-class GPT2LMHeadModel(GPT2MoEPreTrainedModel, GenerationMixin):
+class GPT2LMHeadModel(GPT2MoEPreTrainedModel, GenerationMixiln):
     _tied_weights_keys = {"lm_head.weight": "transformer.wte.weight"}
 
     def __init__(self, config):
@@ -906,7 +892,9 @@ class GPT2LMHeadModel(GPT2MoEPreTrainedModel, GenerationMixin):
             `labels = input_ids` Indices are selected in `[-100, 0, ..., config.vocab_size]` All labels set to `-100`
             are ignored (masked), the loss is only computed for labels in `[0, ..., config.vocab_size]`
         """
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         transformer_outputs = self.transformer(
             input_ids,
@@ -925,7 +913,11 @@ class GPT2LMHeadModel(GPT2MoEPreTrainedModel, GenerationMixin):
         )
         hidden_states = transformer_outputs[0]
 
-        slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
+        slice_indices = (
+            slice(-logits_to_keep, None)
+            if isinstance(logits_to_keep, int)
+            else logits_to_keep
+        )
         logits = self.lm_head(hidden_states[:, slice_indices, :])
 
         loss = None
@@ -960,7 +952,7 @@ class GPT2LMHeadModel(GPT2MoEPreTrainedModel, GenerationMixin):
     input sequence).
     """
 )
-class GPT2DoubleHeadsModel(GPT2MoEPreTrainedModel, GenerationMixin):
+class GPT2DoubleHeadsModel(GPT2MoEPreTrainedModel, GenerationMixiln):
     _tied_weights_keys = {"lm_head.weight": "transformer.wte.weight"}
 
     def __init__(self, config):
@@ -1041,7 +1033,9 @@ class GPT2DoubleHeadsModel(GPT2MoEPreTrainedModel, GenerationMixin):
         >>> lm_logits = outputs.logits
         >>> mc_logits = outputs.mc_logits
         ```"""
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         transformer_outputs = self.transformer(
             input_ids,
@@ -1065,14 +1059,18 @@ class GPT2DoubleHeadsModel(GPT2MoEPreTrainedModel, GenerationMixin):
         mc_loss = None
         if mc_labels is not None:
             loss_fct = CrossEntropyLoss()
-            mc_loss = loss_fct(mc_logits.view(-1, mc_logits.size(-1)), mc_labels.view(-1))
+            mc_loss = loss_fct(
+                mc_logits.view(-1, mc_logits.size(-1)), mc_labels.view(-1)
+            )
         lm_loss = None
         if labels is not None:
             labels = labels.to(lm_logits.device)
             shift_logits = lm_logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
             loss_fct = CrossEntropyLoss()
-            lm_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+            lm_loss = loss_fct(
+                shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1)
+            )
 
         if not return_dict:
             output = (lm_logits, mc_logits) + transformer_outputs[1:]
@@ -1148,7 +1146,9 @@ class GPT2ForSequenceClassification(GPT2MoEPreTrainedModel):
             config.num_labels - 1]`. If `config.num_labels == 1` a regression loss is computed (Mean-Square loss), If
             `config.num_labels > 1` a classification loss is computed (Cross-Entropy).
         """
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         transformer_outputs = self.transformer(
             input_ids,
@@ -1171,13 +1171,19 @@ class GPT2ForSequenceClassification(GPT2MoEPreTrainedModel):
             batch_size, sequence_length = inputs_embeds.shape[:2]
 
         if self.config.pad_token_id is None and batch_size != 1:
-            raise ValueError("Cannot handle batch sizes > 1 if no padding token is defined.")
+            raise ValueError(
+                "Cannot handle batch sizes > 1 if no padding token is defined."
+            )
         if self.config.pad_token_id is None:
             last_non_pad_token = -1
         elif input_ids is not None:
             # To handle both left- and right- padding, we take the rightmost token that is not equal to pad_token_id
-            non_pad_mask = (input_ids != self.config.pad_token_id).to(logits.device, torch.int32)
-            token_indices = torch.arange(input_ids.shape[-1], device=logits.device, dtype=torch.int32)
+            non_pad_mask = (input_ids != self.config.pad_token_id).to(
+                logits.device, torch.int32
+            )
+            token_indices = torch.arange(
+                input_ids.shape[-1], device=logits.device, dtype=torch.int32
+            )
             last_non_pad_token = (token_indices * non_pad_mask).argmax(-1)
         else:
             last_non_pad_token = -1
@@ -1186,14 +1192,18 @@ class GPT2ForSequenceClassification(GPT2MoEPreTrainedModel):
                 "unexpected if using padding tokens in conjunction with `inputs_embeds.`"
             )
 
-        pooled_logits = logits[torch.arange(batch_size, device=logits.device), last_non_pad_token]
+        pooled_logits = logits[
+            torch.arange(batch_size, device=logits.device), last_non_pad_token
+        ]
 
         loss = None
         if labels is not None:
             if self.config.problem_type is None:
                 if self.num_labels == 1:
                     self.config.problem_type = "regression"
-                elif self.num_labels > 1 and (labels.dtype == torch.long or labels.dtype == torch.int):
+                elif self.num_labels > 1 and (
+                    labels.dtype == torch.long or labels.dtype == torch.int
+                ):
                     self.config.problem_type = "single_label_classification"
                 else:
                     self.config.problem_type = "multi_label_classification"
@@ -1206,7 +1216,9 @@ class GPT2ForSequenceClassification(GPT2MoEPreTrainedModel):
                     loss = loss_fct(pooled_logits, labels)
             elif self.config.problem_type == "single_label_classification":
                 loss_fct = CrossEntropyLoss()
-                loss = loss_fct(pooled_logits.view(-1, self.num_labels), labels.view(-1))
+                loss = loss_fct(
+                    pooled_logits.view(-1, self.num_labels), labels.view(-1)
+                )
             elif self.config.problem_type == "multi_label_classification":
                 loss_fct = BCEWithLogitsLoss()
                 loss = loss_fct(pooled_logits, labels)
@@ -1230,7 +1242,10 @@ class GPT2ForTokenClassification(GPT2MoEPreTrainedModel):
         self.num_labels = config.num_labels
 
         self.transformer = GPT2MoEModel(config)
-        if hasattr(config, "classifier_dropout") and config.classifier_dropout is not None:
+        if (
+            hasattr(config, "classifier_dropout")
+            and config.classifier_dropout is not None
+        ):
             classifier_dropout = config.classifier_dropout
         elif hasattr(config, "hidden_dropout") and config.hidden_dropout is not None:
             classifier_dropout = config.hidden_dropout
@@ -1275,7 +1290,9 @@ class GPT2ForTokenClassification(GPT2MoEPreTrainedModel):
             config.num_labels - 1]`. If `config.num_labels == 1` a regression loss is computed (Mean-Square loss), If
             `config.num_labels > 1` a classification loss is computed (Cross-Entropy).
         """
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         transformer_outputs = self.transformer(
             input_ids,
@@ -1351,7 +1368,9 @@ class GPT2ForQuestionAnswering(GPT2MoEPreTrainedModel):
 
             [What are input IDs?](../glossary#input-ids)
         """
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         outputs = self.transformer(
             input_ids,
