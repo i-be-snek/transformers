@@ -38,6 +38,7 @@ from ...modeling_outputs import (
     SequenceClassifierOutputWithPast,
     TokenClassifierOutput,
     MoeModelOutputWithPast,
+    MoeCausalLMOutputWithPast,
 )
 from ...modeling_utils import ALL_ATTENTION_FUNCTIONS, PreTrainedModel
 from ...pytorch_utils import Conv1D
@@ -844,6 +845,98 @@ class GPT2MoEModel(GPT2MoEPreTrainedModel):
     embeddings).
     """
 )
+class GPT2MoEForCausalLM(GPT2MoEPreTrainedModel, GenerationMixiln):
+    _tied_weights_keys = ["lm_head.weight"]
+
+    def __init__(self, config):
+        super().__init__(config)
+        self.transformer = GPT2MoEModel(config)
+        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+
+        self.num_expert = config.n_expert
+        self.k = config.top_k_expert
+        self.router_aux_loss_coef = config.router_aux_loss_coef
+
+        # Initialize weights and apply final processing
+        self.post_init()
+
+    def get_output_embeddings(self):
+        return self.lm_head
+
+    def set_output_embeddings(self, new_embeddings):
+        self.lm_head = new_embeddings
+
+    def forward(
+        self,
+        input_ids: Optional[torch.LongTensor] = None,
+        past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
+        attention_mask: Optional[torch.FloatTensor] = None,
+        token_type_ids: Optional[torch.LongTensor] = None,
+        head_mask: Optional[torch.FloatTensor] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.LongTensor] = None,
+        output_router_logits: Optional[bool] = None,
+        use_cache: Optional[bool] = None,
+        *args,
+        **kwargs,
+    ) -> Union[Tuple, MoeCausalLMOutputWithPast]:
+        r"""
+        labels (
+          `torch.LongTensor` of shape `(batch_size, sequence_length)`,
+          *optional*
+        ):
+            Labels for language modeling. Note that the labels **are shifted**
+            inside the model, i.e. you can set `labels = input_ids` Indices are
+            selected in `[-100, 0, ..., config.vocab_size]` All labels set
+            to `-100` are ignored (masked), the loss is only computed for
+            labels in `[0, ..., config.vocab_size]`
+        """
+
+        transformer_outputs = self.transformer(
+            input_ids,
+            past_key_values=past_key_values,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+            output_router_logits=output_router_logits,
+            use_cache=use_cache,
+        )
+        hidden_states = transformer_outputs[0]
+
+        lm_logits = self.lm_head(hidden_states)
+
+        loss = None
+        if labels is not None:
+            # Flatten the tokens
+            loss = self.loss_function(
+                lm_logits,
+                labels,
+                vocab_size=self.config.vocab_size,
+                **kwargs,
+            )
+
+        aux_loss = None
+        if output_router_logits:
+            aux_loss = load_balancing_loss_func(
+                transformer_outputs.router_logits,
+                self.num_expert,
+                self.k,
+                attention_mask,
+            )
+
+            if labels is not None:
+                loss += self.router_aux_loss_coef * aux_loss.to(loss.device)
+
+        return MoeCausalLMOutputWithPast(
+            loss=loss,
+            aux_loss=aux_loss,
+            logits=lm_logits,
+            past_key_values=transformer_outputs.past_key_values,
+            router_logits=transformer_outputs.router_logits,
+        )
+
+
 class GPT2MoELMHeadModel(GPT2MoEPreTrainedModel, GenerationMixiln):
     _tied_weights_keys = {"lm_head.weight": "transformer.wte.weight"}
 
@@ -1429,4 +1522,5 @@ __all__ = [
     "GPT2MoELMHeadModel",
     "GPT2MoEMoEModel",
     "GPT2MoEMoEPreTrainedModel",
+    "GPT2MoEForCausalLM",
 ]

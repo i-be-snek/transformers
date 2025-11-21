@@ -126,7 +126,7 @@ class GPT2Config(PreTrainedConfig):
     >>> configuration = model.config
     ```"""
 
-    model_type = "gpt2moe"
+    model_type = "gpt2_moe"
     keys_to_ignore_at_inference = ["past_key_values"]
     attribute_map = {
         "hidden_size": "n_embd",
