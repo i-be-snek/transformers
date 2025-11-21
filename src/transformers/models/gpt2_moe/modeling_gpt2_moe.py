@@ -37,6 +37,7 @@ from ...modeling_outputs import (
     QuestionAnsweringModelOutput,
     SequenceClassifierOutputWithPast,
     TokenClassifierOutput,
+    MoeModelOutputWithPast,
 )
 from ...modeling_utils import ALL_ATTENTION_FUNCTIONS, PreTrainedModel
 from ...pytorch_utils import Conv1D
@@ -428,7 +429,7 @@ class MixtureOfExperts(nn.Module):
         return final_hidden_states, router_logits
 
 
-class GPT2MoEBlock(nn.Module):
+class GPT2MoEBlock(GradientCheckpointingLayer):
     def __init__(self, config, layer_idx=None):
         super().__init__()
         hidden_size = config.hidden_size
