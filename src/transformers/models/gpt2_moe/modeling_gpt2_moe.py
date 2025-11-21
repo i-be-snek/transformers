@@ -486,8 +486,8 @@ class GPT2MoEBlock(GradientCheckpointingLayer):
         return outputs
 
 
-# Copied from transformers.models.xlm.modeling_xlm.XLMSequenceSummary with XLM->GPT2
-class GPT2SequenceSummary(nn.Module):
+# Copied from transformers.models.xlm.modeling_xlm.XLMSequenceSummary with XLM->GPT2MoE
+class GPT2MoESequenceSummary(nn.Module):
     r"""
     Compute a single vector summary of a sequence hidden states.
 
@@ -664,7 +664,7 @@ class GPT2MoEPreTrainedModel(PreTrainedModel):
     Base class for outputs of models predicting if two sentences are consecutive or not.
     """
 )
-class GPT2DoubleHeadsModelOutput(ModelOutput):
+class GPT2MoEDoubleHeadsModelOutput(ModelOutput):
     r"""
     loss (`torch.FloatTensor` of shape `(1,)`, *optional*, returned when `labels` is provided):
         Language modeling loss.
@@ -840,16 +840,16 @@ class GPT2MoEModel(GPT2MoEPreTrainedModel):
 
 @auto_docstring(
     custom_intro="""
-    The GPT2 Model transformer with a language modeling head on top (linear layer with weights tied to the input
+    The GPT2MoE Model transformer with a language modeling head on top (linear layer with weights tied to the input
     embeddings).
     """
 )
-class GPT2LMHeadModel(GPT2MoEPreTrainedModel, GenerationMixiln):
+class GPT2MoELMHeadModel(GPT2MoEPreTrainedModel, GenerationMixiln):
     _tied_weights_keys = {"lm_head.weight": "transformer.wte.weight"}
 
     def __init__(self, config):
         super().__init__(config)
-        self.transformer = GPT2Model(config)
+        self.transformer = GPT2MoEModel(config)
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
         # Initialize weights and apply final processing
@@ -947,21 +947,21 @@ class GPT2LMHeadModel(GPT2MoEPreTrainedModel, GenerationMixiln):
 
 @auto_docstring(
     custom_intro="""
-        The GPT2 Model transformer with a language modeling and a multiple-choice classification head on top e.g. for
+        The GPT2MoE Model transformer with a language modeling and a multiple-choice classification head on top e.g. for
     RocStories/SWAG tasks. The two heads are two linear layers. The language modeling head has its weights tied to the
     input embeddings, the classification head takes as input the input of a specified classification token index in the
     input sequence).
     """
 )
-class GPT2DoubleHeadsModel(GPT2MoEPreTrainedModel, GenerationMixiln):
+class GPT2MoEDoubleHeadsModel(GPT2MoEPreTrainedModel, GenerationMixiln):
     _tied_weights_keys = {"lm_head.weight": "transformer.wte.weight"}
 
     def __init__(self, config):
         super().__init__(config)
         config.num_labels = 1
-        self.transformer = GPT2Model(config)
+        self.transformer = GPT2MoEModel(config)
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        self.multiple_choice_head = GPT2SequenceSummary(config)
+        self.multiple_choice_head = GPT2MoESequenceSummary(config)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -984,7 +984,7 @@ class GPT2DoubleHeadsModel(GPT2MoEPreTrainedModel, GenerationMixiln):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         **kwargs,
-    ) -> Union[tuple, GPT2DoubleHeadsModelOutput]:
+    ) -> Union[tuple, GPT2MoEDoubleHeadsModelOutput]:
         r"""
         input_ids (`torch.LongTensor` of shape `(batch_size, input_ids_length)`):
             `input_ids_length` = `sequence_length` if `past_key_values` is `None` else
@@ -1013,10 +1013,10 @@ class GPT2DoubleHeadsModel(GPT2MoEPreTrainedModel, GenerationMixiln):
 
         ```python
         >>> import torch
-        >>> from transformers import AutoTokenizer, GPT2DoubleHeadsModel
+        >>> from transformers import AutoTokenizer, GPT2MoEDoubleHeadsModel
 
         >>> tokenizer = AutoTokenizer.from_pretrained("openai-community/gpt2")
-        >>> model = GPT2DoubleHeadsModel.from_pretrained("openai-community/gpt2")
+        >>> model = GPT2MoEDoubleHeadsModel.from_pretrained("openai-community/gpt2")
 
         >>> # Add a [CLS] to the vocabulary (we should train it also!)
         >>> num_added_tokens = tokenizer.add_special_tokens({"cls_token": "[CLS]"})
@@ -1079,7 +1079,7 @@ class GPT2DoubleHeadsModel(GPT2MoEPreTrainedModel, GenerationMixiln):
                 output = (mc_loss,) + output
             return ((lm_loss,) + output) if lm_loss is not None else output
 
-        return GPT2DoubleHeadsModelOutput(
+        return GPT2MoEDoubleHeadsModelOutput(
             loss=lm_loss,
             mc_loss=mc_loss,
             logits=lm_logits,
@@ -1092,9 +1092,9 @@ class GPT2DoubleHeadsModel(GPT2MoEPreTrainedModel, GenerationMixiln):
 
 @auto_docstring(
     custom_intro="""
-    The GPT2 Model transformer with a sequence classification head on top (linear layer).
+    The GPT2MoE Model transformer with a sequence classification head on top (linear layer).
 
-    [`GPT2ForSequenceClassification`] uses the last token in order to do the classification, as other causal models
+    [`GPT2MoEForSequenceClassification`] uses the last token in order to do the classification, as other causal models
     (e.g. GPT-1) do.
 
     Since it does classification on the last token, it requires to know the position of the last token. If a
@@ -1104,7 +1104,7 @@ class GPT2DoubleHeadsModel(GPT2MoEPreTrainedModel, GenerationMixiln):
     each row of the batch).
     """
 )
-class GPT2ForSequenceClassification(GPT2MoEPreTrainedModel):
+class GPT2MoEForSequenceClassification(GPT2MoEPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
@@ -1237,7 +1237,7 @@ class GPT2ForSequenceClassification(GPT2MoEPreTrainedModel):
 
 
 @auto_docstring
-class GPT2ForTokenClassification(GPT2MoEPreTrainedModel):
+class GPT2MoEForTokenClassification(GPT2MoEPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
@@ -1331,11 +1331,11 @@ class GPT2ForTokenClassification(GPT2MoEPreTrainedModel):
 
 
 @auto_docstring
-class GPT2ForQuestionAnswering(GPT2MoEPreTrainedModel):
+class GPT2MoEForQuestionAnswering(GPT2MoEPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
-        self.transformer = GPT2Model(config)
+        self.transformer = GPT2MoEModel(config)
         self.qa_outputs = nn.Linear(config.hidden_size, 2)
 
         # Initialize weights and apply final processing
@@ -1422,11 +1422,11 @@ class GPT2ForQuestionAnswering(GPT2MoEPreTrainedModel):
 
 
 __all__ = [
-    "GPT2DoubleHeadsModel",
-    "GPT2ForQuestionAnswering",
-    "GPT2ForSequenceClassification",
-    "GPT2ForTokenClassification",
-    "GPT2LMHeadModel",
-    "GPT2Model",
-    "GPT2MoEPreTrainedModel",
+    "GPT2MoEDoubleHeadsModel",
+    "GPT2MoEForQuestionAnswering",
+    "GPT2MoEForSequenceClassification",
+    "GPT2MoEForTokenClassification",
+    "GPT2MoELMHeadModel",
+    "GPT2MoEMoEModel",
+    "GPT2MoEMoEPreTrainedModel",
 ]

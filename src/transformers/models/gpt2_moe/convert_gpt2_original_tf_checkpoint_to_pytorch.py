@@ -19,7 +19,7 @@ import os
 
 import torch
 
-from transformers import GPT2Config, GPT2Model
+from transformers import GPT2MoEConfig, GPT2MoEModel
 from transformers.utils import CONFIG_NAME, WEIGHTS_NAME, logging
 
 
@@ -74,7 +74,9 @@ def load_tf_weights_in_gpt2(model, config, gpt2_checkpoint_path):
                 pointer = pointer[num]
         try:
             if pointer.shape != array.shape:
-                raise ValueError(f"Pointer shape {pointer.shape} and array shape {array.shape} mismatched")
+                raise ValueError(
+                    f"Pointer shape {pointer.shape} and array shape {array.shape} mismatched"
+                )
         except ValueError as e:
             e.args += (pointer.shape, array.shape)
             raise
@@ -83,13 +85,15 @@ def load_tf_weights_in_gpt2(model, config, gpt2_checkpoint_path):
     return model
 
 
-def convert_gpt2_checkpoint_to_pytorch(gpt2_checkpoint_path, gpt2_config_file, pytorch_dump_folder_path):
+def convert_gpt2_checkpoint_to_pytorch(
+    gpt2_checkpoint_path, gpt2_config_file, pytorch_dump_folder_path
+):
     # Construct model
     if gpt2_config_file == "":
-        config = GPT2Config()
+        config = GPT2MoEConfig()
     else:
-        config = GPT2Config.from_json_file(gpt2_config_file)
-    model = GPT2Model(config)
+        config = GPT2MoEConfig.from_json_file(gpt2_config_file)
+    model = GPT2MoEModel(config)
 
     # Load weights from numpy
     load_tf_weights_in_gpt2(model, config, gpt2_checkpoint_path)
@@ -108,10 +112,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Required parameters
     parser.add_argument(
-        "--gpt2_checkpoint_path", default=None, type=str, required=True, help="Path to the TensorFlow checkpoint path."
+        "--gpt2_checkpoint_path",
+        default=None,
+        type=str,
+        required=True,
+        help="Path to the TensorFlow checkpoint path.",
     )
     parser.add_argument(
-        "--pytorch_dump_folder_path", default=None, type=str, required=True, help="Path to the output PyTorch model."
+        "--pytorch_dump_folder_path",
+        default=None,
+        type=str,
+        required=True,
+        help="Path to the output PyTorch model.",
     )
     parser.add_argument(
         "--gpt2_config_file",
@@ -123,4 +135,6 @@ if __name__ == "__main__":
         ),
     )
     args = parser.parse_args()
-    convert_gpt2_checkpoint_to_pytorch(args.gpt2_checkpoint_path, args.gpt2_config_file, args.pytorch_dump_folder_path)
+    convert_gpt2_checkpoint_to_pytorch(
+        args.gpt2_checkpoint_path, args.gpt2_config_file, args.pytorch_dump_folder_path
+    )
