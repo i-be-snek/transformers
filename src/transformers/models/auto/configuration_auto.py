@@ -181,6 +181,7 @@ CONFIG_MAPPING_NAMES = OrderedDict[str, str](
         ("got_ocr2", "GotOcr2Config"),
         ("gpt-sw3", "GPT2Config"),
         ("gpt2", "GPT2Config"),
+        ("gpt2moe", "GPT2MoEConfig"),
         ("gpt_bigcode", "GPTBigCodeConfig"),
         ("gpt_neo", "GPTNeoConfig"),
         ("gpt_neox", "GPTNeoXConfig"),
