@@ -22,7 +22,10 @@ from collections.abc import Callable, Iterator, KeysView, ValuesView
 from typing import Any, TypeVar, Union
 
 from ...configuration_utils import PreTrainedConfig
-from ...dynamic_module_utils import get_class_from_dynamic_module, resolve_trust_remote_code
+from ...dynamic_module_utils import (
+    get_class_from_dynamic_module,
+    resolve_trust_remote_code,
+)
 from ...utils import CONFIG_NAME, logging
 
 
@@ -1014,7 +1017,9 @@ class _LazyConfigMapping(OrderedDict[str, type[PreTrainedConfig]]):
         value = self._mapping[key]
         module_name = model_type_to_module_name(key)
         if module_name not in self._modules:
-            self._modules[module_name] = importlib.import_module(f".{module_name}", "transformers.models")
+            self._modules[module_name] = importlib.import_module(
+                f".{module_name}", "transformers.models"
+            )
         if hasattr(self._modules[module_name], value):
             return getattr(self._modules[module_name], value)
 
@@ -1043,7 +1048,9 @@ class _LazyConfigMapping(OrderedDict[str, type[PreTrainedConfig]]):
         Register a new configuration in this mapping.
         """
         if key in self._mapping and not exist_ok:
-            raise ValueError(f"'{key}' is already used by a Transformers config, pick another name.")
+            raise ValueError(
+                f"'{key}' is already used by a Transformers config, pick another name."
+            )
         self._extra_content[key] = value
 
 
@@ -1109,10 +1116,15 @@ def _get_class_name(model_class: Union[str, list[str]]):
 
 def _list_model_options(indent, config_to_class=None, use_model_types=True):
     if config_to_class is None and not use_model_types:
-        raise ValueError("Using `use_model_types=False` requires a `config_to_class` dictionary.")
+        raise ValueError(
+            "Using `use_model_types=False` requires a `config_to_class` dictionary."
+        )
     if use_model_types:
         if config_to_class is None:
-            model_type_to_name = {model_type: f"[`{config}`]" for model_type, config in CONFIG_MAPPING_NAMES.items()}
+            model_type_to_name = {
+                model_type: f"[`{config}`]"
+                for model_type, config in CONFIG_MAPPING_NAMES.items()
+            }
         else:
             model_type_to_name = {
                 model_type: _get_class_name(model_class)
@@ -1130,7 +1142,8 @@ def _list_model_options(indent, config_to_class=None, use_model_types=True):
             if config in CONFIG_MAPPING_NAMES
         }
         config_to_model_name = {
-            config: MODEL_NAMES_MAPPING[model_type] for model_type, config in CONFIG_MAPPING_NAMES.items()
+            config: MODEL_NAMES_MAPPING[model_type]
+            for model_type, config in CONFIG_MAPPING_NAMES.items()
         }
         lines = [
             f"{indent}- [`{config_name}`] configuration class:"
@@ -1156,7 +1169,9 @@ def replace_list_option_in_docstrings(
             indent = re.search(r"^(\s*)List options\s*$", lines[i]).groups()[0]
             if use_model_types:
                 indent = f"{indent}    "
-            lines[i] = _list_model_options(indent, config_to_class=config_to_class, use_model_types=use_model_types)
+            lines[i] = _list_model_options(
+                indent, config_to_class=config_to_class, use_model_types=use_model_types
+            )
             docstrings = "\n".join(lines)
         else:
             raise ValueError(
@@ -1194,7 +1209,9 @@ class AutoConfig:
 
     @classmethod
     @replace_list_option_in_docstrings()
-    def from_pretrained(cls, pretrained_model_name_or_path: Union[str, os.PathLike[str]], **kwargs):
+    def from_pretrained(
+        cls, pretrained_model_name_or_path: Union[str, os.PathLike[str]], **kwargs
+    ):
         r"""
         Instantiate one of the configuration classes of the library from a pretrained model configuration.
 
@@ -1279,9 +1296,15 @@ class AutoConfig:
         trust_remote_code = kwargs.pop("trust_remote_code", None)
         code_revision = kwargs.pop("code_revision", None)
 
-        config_dict, unused_kwargs = PreTrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
-        has_remote_code = "auto_map" in config_dict and "AutoConfig" in config_dict["auto_map"]
-        has_local_code = "model_type" in config_dict and config_dict["model_type"] in CONFIG_MAPPING
+        config_dict, unused_kwargs = PreTrainedConfig.get_config_dict(
+            pretrained_model_name_or_path, **kwargs
+        )
+        has_remote_code = (
+            "auto_map" in config_dict and "AutoConfig" in config_dict["auto_map"]
+        )
+        has_local_code = (
+            "model_type" in config_dict and config_dict["model_type"] in CONFIG_MAPPING
+        )
         if has_remote_code:
             class_ref = config_dict["auto_map"]["AutoConfig"]
             if "--" in class_ref:
@@ -1289,12 +1312,19 @@ class AutoConfig:
             else:
                 upstream_repo = None
             trust_remote_code = resolve_trust_remote_code(
-                trust_remote_code, pretrained_model_name_or_path, has_local_code, has_remote_code, upstream_repo
+                trust_remote_code,
+                pretrained_model_name_or_path,
+                has_local_code,
+                has_remote_code,
+                upstream_repo,
             )
 
         if has_remote_code and trust_remote_code:
             config_class = get_class_from_dynamic_module(
-                class_ref, pretrained_model_name_or_path, code_revision=code_revision, **kwargs
+                class_ref,
+                pretrained_model_name_or_path,
+                code_revision=code_revision,
+                **kwargs,
             )
             config_class.register_for_auto_class()
             return config_class.from_pretrained(pretrained_model_name_or_path, **kwargs)
@@ -1325,7 +1355,9 @@ class AutoConfig:
             # We go from longer names to shorter names to catch roberta before bert (for instance)
             for pattern in sorted(CONFIG_MAPPING.keys(), key=len, reverse=True):
                 if pattern in str(pretrained_model_name_or_path):
-                    return CONFIG_MAPPING[pattern].from_dict(config_dict, **unused_kwargs)
+                    return CONFIG_MAPPING[pattern].from_dict(
+                        config_dict, **unused_kwargs
+                    )
 
         raise ValueError(
             f"Unrecognized model in {pretrained_model_name_or_path}. "
