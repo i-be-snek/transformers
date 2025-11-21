@@ -125,6 +125,7 @@ class GPT2Config(PreTrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
+
     model_type = "gpt2moe"
     keys_to_ignore_at_inference = ["past_key_values"]
     attribute_map = {
@@ -161,7 +162,8 @@ class GPT2Config(PreTrainedConfig):
         n_expert=5,
         top_k_expert=2,
         router_aux_loss_coef=4e-2,
-        scale_down_ffn=3,
+        scale_down_ffn=1,
+        output_router_logits=False,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -193,11 +195,13 @@ class GPT2Config(PreTrainedConfig):
         self.router_aux_loss_coef = router_aux_loss_coef
 
         self.scale_down_ffn = scale_down_ffn
+        self.output_router_logits = output_router_logits
 
         super().__init__(
             bos_token_id=bos_token_id,
             eos_token_id=eos_token_id,
             **kwargs,
         )
+
 
 __all__ = ["GPT2MoEConfig"]
