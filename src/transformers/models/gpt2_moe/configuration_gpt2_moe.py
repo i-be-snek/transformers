@@ -15,14 +15,14 @@
 # limitations under the License.
 """OpenAI GPT-2 configuration"""
 
-from ...configuration_utils import PreTrainedConfig
+from ...configuration_utils import PretrainedConfig
 from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
 
 
-class GPT2MoEConfig(PreTrainedConfig):
+class GPT2MoEConfig(PretrainedConfig):
     """
     This is the configuration class to store the configuration of a [`GPT2Model`] or a [`TFGPT2Model`]. It is used to
     instantiate a GPT-2 model according to the specified arguments, defining the model architecture. Instantiating a
