@@ -337,7 +337,7 @@ class GPT2MoEAttention(nn.Module):
         return outputs
 
 
-class GPT2MLP(nn.Module):
+class GPT2MoEMLP(nn.Module):
     def __init__(self, intermediate_size, config):
         super().__init__()
         embed_dim = config.hidden_size
@@ -367,7 +367,7 @@ class MixtureOfExperts(nn.Module):
         self.k = config.top_k_expert
 
         self.experts = nn.ModuleList(
-            [GPT2MLP(intermediate_size, config) for _ in range(self.num_expert)]
+            [GPT2MoEMLP(intermediate_size, config) for _ in range(self.num_expert)]
         )
 
         self.gating_network = nn.Linear(
