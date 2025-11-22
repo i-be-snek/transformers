@@ -818,8 +818,8 @@ class GPT2MoEModel(GPT2MoEPreTrainedModel):
             past_length = 0
             past_key_values = tuple([None] * len(self.h))
         else:
-            if past_key_values[0][0].size(-2) is None:
-                print("past_key_values[0][0].size(-2) is None, past_length set to 0")
+            if past_key_values[0][0] is None:
+                print("past_key_values[0][0] is None, past_length set to 0")
                 past_length = 0
                 past_key_values = tuple([None] * len(self.h))
             else:
