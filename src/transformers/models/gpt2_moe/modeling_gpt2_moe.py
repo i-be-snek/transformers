@@ -812,7 +812,6 @@ class GPT2MoEModel(GPT2MoEPreTrainedModel):
         if token_type_ids is not None:
             token_type_ids = token_type_ids.view(-1, input_shape[-1])
 
-        print("past_key_values", past_key_values)
         if past_key_values is None:
             print("past_key_values is None, past_length set to 0")
             past_length = 0
