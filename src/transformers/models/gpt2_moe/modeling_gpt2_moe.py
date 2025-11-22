@@ -971,7 +971,7 @@ class GPT2MoEForCausalLM(GPT2MoEPreTrainedModel, GenerationMixin):
             output_router_logits=output_router_logits,
             use_cache=use_cache,
         )
-        hidden_states = transformer_outputs.last_hidden_state
+        hidden_states = transformer_outputs[0]
 
         lm_logits = self.lm_head(hidden_states)
 
@@ -1002,9 +1002,7 @@ class GPT2MoEForCausalLM(GPT2MoEPreTrainedModel, GenerationMixin):
             aux_loss=aux_loss,
             logits=lm_logits,
             past_key_values=transformer_outputs.past_key_values,
-            # hidden_states=transformer_outputs.hidden_states,
-            # attentions=transformer_outputs.attentions,
-            # router_logits=transformer_outputs.router_logits,
+            router_logits=transformer_outputs.router_logits,
         )
 
 
