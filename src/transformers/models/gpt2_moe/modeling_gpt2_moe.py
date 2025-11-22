@@ -118,20 +118,7 @@ def load_balancing_loss_func(
             .reshape(-1, top_k, num_experts)
             .to(compute_device)
         )
-
-        print("expert_attention_mask", expert_attention_mask)
-        print("expert_mask", expert_mask)
-
-        try:
-            print("expert_mask size", expert_mask.size())
-        except BaseException as err:
-            print("expert_mask err", err)
-
-        try:
-            print("expert_attention_mask size", expert_attention_mask.size())
-        except BaseException as err:
-            print("expert_attention_mask err", err)
-
+        print("expert_attention_mask", expert_attention_mask.size(), "attention_mask", attention_mask.size())
         # Compute the percentage of tokens routed to each experts
         tokens_per_expert = torch.sum(
             expert_mask.float() * expert_attention_mask, dim=0
@@ -830,7 +817,10 @@ class GPT2MoEModel(GPT2MoEPreTrainedModel):
                 past_key_values = tuple([None] * len(self.h))
             else:
                 past_length = past_key_values[0][0].size(-2)
-                print("past_key_values[0][0].size(-2) is present, past_length =", past_key_values[0][0].size(-2))
+                print(
+                    "past_key_values[0][0].size(-2) is present, past_length =",
+                    past_key_values[0][0].size(-2),
+                )
 
         position_ids = torch.arange(
             past_length,
