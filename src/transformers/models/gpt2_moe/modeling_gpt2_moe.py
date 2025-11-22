@@ -812,10 +812,12 @@ class GPT2MoEModel(GPT2MoEPreTrainedModel):
         if token_type_ids is not None:
             token_type_ids = token_type_ids.view(-1, input_shape[-1])
 
+        print("past_key_values", past_key_values)
         if past_key_values is None:
             past_length = 0
             past_key_values = tuple([None] * len(self.h))
         else:
+            print("else past_key_values[0]", past_key_values[0])
             past_length = past_key_values[0][0].size(-2)
 
         position_ids = torch.arange(
