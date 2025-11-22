@@ -118,7 +118,12 @@ def load_balancing_loss_func(
             .reshape(-1, top_k, num_experts)
             .to(compute_device)
         )
-        print("expert_attention_mask", expert_attention_mask.size(), "attention_mask", attention_mask.size())
+        print(
+            "expert_attention_mask",
+            expert_attention_mask.size(),
+            "attention_mask",
+            attention_mask.size(),
+        )
         # Compute the percentage of tokens routed to each experts
         tokens_per_expert = torch.sum(
             expert_mask.float() * expert_attention_mask, dim=0
@@ -997,9 +1002,9 @@ class GPT2MoEForCausalLM(GPT2MoEPreTrainedModel, GenerationMixin):
             aux_loss=aux_loss,
             logits=lm_logits,
             past_key_values=transformer_outputs.past_key_values,
-            #hidden_states=transformer_outputs.hidden_states,
-            #attentions=transformer_outputs.attentions,
-            #router_logits=transformer_outputs.router_logits,
+            # hidden_states=transformer_outputs.hidden_states,
+            # attentions=transformer_outputs.attentions,
+            # router_logits=transformer_outputs.router_logits,
         )
 
 
