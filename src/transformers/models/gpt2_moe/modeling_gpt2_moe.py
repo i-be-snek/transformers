@@ -814,14 +814,17 @@ class GPT2MoEModel(GPT2MoEPreTrainedModel):
 
         print("past_key_values", past_key_values)
         if past_key_values is None:
+            print("past_key_values is None, past_length set to 0")
             past_length = 0
             past_key_values = tuple([None] * len(self.h))
         else:
-            print("else past_key_values[0]", past_key_values[0])
-            # past_length = past_key_values[0][0].size(-2)
-            past_length = 0
-            print("turning past_key_values to", tuple([None] * len(self.h)))
-            past_key_values = tuple([None] * len(self.h))
+            if past_key_values[0][0].size(-2) is None:
+                print("past_key_values[0][0].size(-2) is None, past_length set to 0")
+                past_length = 0
+                past_key_values = tuple([None] * len(self.h))
+            else:
+                past_length = past_key_values[0][0].size(-2)
+                print("past_key_values[0][0].size(-2) is present, past_length =", past_key_values[0][0].size(-2))
 
         position_ids = torch.arange(
             past_length,
