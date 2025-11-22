@@ -137,12 +137,15 @@ def load_balancing_loss_func(
             .to(compute_device)
         )
 
+        print("router_per_expert_attention_masks", router_per_expert_attention_mask)
         # Compute the average probability of routing to these experts
         router_prob_per_expert = torch.sum(
             routing_weights * router_per_expert_attention_mask, dim=0
         ) / torch.sum(router_per_expert_attention_mask, dim=0)
 
+        print("router_prob_per_expert", router_prob_per_expert)
     overall_loss = torch.sum(tokens_per_expert * router_prob_per_expert.unsqueeze(0))
+    print("overall_loss", overall_loss)
     return overall_loss * num_experts
 
 
