@@ -124,6 +124,20 @@ def load_balancing_loss_func(
             .to(compute_device)
         )
 
+
+        print("expert_attention_mask", expert_attention_mask)
+        print("expert_mask", expert_mask)
+
+        try:
+            print("expert_mask size", expert_mask.size)
+        except BaseException as err:
+            print("expert_mask err", err)
+
+        try:
+            print("expert_attention_mask size", expert_attention_mask.size)
+        except BaseException as err:
+            print("expert_attention_mask err", err)
+
         # Compute the percentage of tokens routed to each experts
         tokens_per_expert = torch.sum(
             expert_mask.float() * expert_attention_mask, dim=0
