@@ -819,6 +819,7 @@ class GPT2MoEModel(GPT2MoEPreTrainedModel):
         else:
             print("else past_key_values[0]", past_key_values[0])
             # past_length = past_key_values[0][0].size(-2)
+            past_length = 0
             print("turning past_key_values to", tuple([None] * len(self.h)))
             past_key_values = tuple([None] * len(self.h))
 
